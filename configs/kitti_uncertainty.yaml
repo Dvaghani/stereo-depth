@@ -1,0 +1,28 @@
+# KITTI 2015 fine-tune with the Laplace uncertainty head.
+
+# Run with:
+#   python scripts/train.py --config configs/kitti_uncertainty.yaml
+
+dataset: kitti
+data_root: datasets/data_scene_flow
+val_split: 0.1
+
+
+epochs: 30
+batch_size: 4
+num_workers: 4
+
+lr: 3.0e-4
+weight_decay: 1.0e-4
+
+crop: [256, 512]
+max_disp: 192
+
+amp: false
+
+# The two flags that switch on uncertainty:
+predict_uncertainty: true
+init_from: checkpoints/kitti/best.pt
+
+ckpt_dir: checkpoints/kitti_uncertainty
+log_every: 20

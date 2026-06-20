@@ -1,0 +1,32 @@
+# Exp B — quarter-res (downsample=4) fine-tune.
+#
+# At downsample=4 the Middlebury disparity range drops to ~0-134 px (median scene
+# max ~68 px), right in the band the KITTI-pretrained backbone knows best, and
+# NO pixels exceed max_disp=192 (nothing masked). The hypothesis: matching the
+# disparity regime is what unlocks accuracy. NOTE: this mismatches the current
+# half-res (--scale 0.5) deployment; evaluated fairly in /2 space via eval_fair.py
+# (predictions upsampled + value-scaled to /2) so it is comparable to Exp A.
+model: aanet
+dataset: middlebury
+data_root: datasets/middlebury2014
+val_split: 0.15
+
+epochs: 120
+batch_size: 2
+num_workers: 4
+
+lr: 2.0e-4
+weight_decay: 1.0e-4
+
+crop: [256, 384]      # /4 images are ~500x750; both divisible by 64
+max_disp: 192
+downsample: 4         # quarter-res — smaller disparities
+color_jitter: 0.2
+
+amp: false
+predict_uncertainty: false
+init_from: checkpoints/kitti_aanet_ft/best.pt
+middlebury_variant: both
+
+ckpt_dir: checkpoints/middlebury_aanet_ds4
+log_every: 10

@@ -1,0 +1,54 @@
+# AANet backbone fine-tune on Middlebury 2014 — close the indoor domain gap.
+#
+# Why this exists
+# ---------------
+# The AANet backbone (kitti_aanet_ft/best.pt) is trained on KITTI: outdoor,
+# wide-baseline, small disparities (~10-60 px). Indoor close-range scenes (our
+# Brio rig, Middlebury) have very different texture, lighting, and a much larger
+# disparity distribution. This fine-tune adapts the backbone to indoor statistics
+# while staying in the SAME disparity regime we deploy in.
+#
+# Deployment consistency
+# ----------------------
+# Inference runs at --scale 0.5 with max_disp=192. The Middlebury loader forces
+# downsample=2 (= the same half-resolution), and we keep max_disp=192 here, so
+# the model is trained on exactly the disparity range it sees live. GT pixels
+# whose (downsampled) disparity exceeds 192 are masked by the loss — those are
+# the very closest objects, outside the Brio operating range anyway.
+#
+# Data
+# ----
+# Middlebury 2014 is tiny (~23 scenes). variant=both loads perfect AND imperfect
+# rectification (46 pairs) — more data against overfitting, and the imperfect
+# variant trains the model to tolerate small residual vertical misalignment,
+# exactly the condition our rig has after online rectification refinement.
+#
+# Run with:
+#   python scripts/train.py --config configs/middlebury_aanet.yaml
+
+model: aanet
+dataset: middlebury
+data_root: datasets/middlebury2014
+val_split: 0.15
+
+# Small dataset + pretrained backbone → few epochs, LOW lr to avoid catastrophic
+# forgetting of the KITTI-learned geometry. Random crops give augmentation.
+epochs: 60
+batch_size: 2
+num_workers: 4
+
+lr: 5.0e-5
+weight_decay: 1.0e-4
+
+crop: [384, 512]      # both divisible by 64 for AANet's feature pyramid
+max_disp: 192         # matches --scale 0.5 inference
+
+amp: false            # deformable convs in AANet are unstable under AMP
+
+predict_uncertainty: false
+init_from: checkpoints/kitti_aanet_ft/best.pt
+
+middlebury_variant: both
+
+ckpt_dir: checkpoints/middlebury_aanet_ft
+log_every: 5

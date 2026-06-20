@@ -1,0 +1,49 @@
+# ── Datasets (large, download separately) ────────────────────────────────────
+datasets/
+
+# ── Checkpoints (large .pt/.pth files) ───────────────────────────────────────
+checkpoints/
+
+# ── Training outputs (generated, not source) ─────────────────────────────────
+outputs/
+logs/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── C++ / CUDA build artifacts ───────────────────────────────────────────────
+csrc/build/
+*.o
+*.a
+*.cu.o
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── IDEs ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+
+# ── OS files ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.tmp
+*.bak

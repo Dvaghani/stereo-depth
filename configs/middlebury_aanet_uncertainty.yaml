@@ -1,0 +1,38 @@
+# AANet uncertainty-head fine-tune on Middlebury 2014.
+#
+# Starts from the indoor-adapted backbone (middlebury_aanet_ft/best.pt), FREEZES
+# the entire backbone, and trains ONLY the Laplace uncertainty head. Loss is
+# Laplace NLL: |pred - gt| / b + log(b), so the head learns indoor-calibrated
+# per-pixel confidence (b in px; confident = b < 2px).
+#
+# The freeze is automatic: model=aanet + predict_uncertainty=true + init_from
+# set → train.py freezes everything except uncertainty_head.
+#
+# Run AFTER middlebury_aanet.yaml has produced its checkpoint:
+#   python scripts/train.py --config configs/middlebury_aanet_uncertainty.yaml
+
+model: aanet
+dataset: middlebury
+data_root: datasets/middlebury2014
+val_split: 0.15
+
+# Backbone frozen; only the small head (~9k params) trains → fewer epochs.
+epochs: 30
+batch_size: 2
+num_workers: 4
+
+lr: 3.0e-4
+weight_decay: 1.0e-4
+
+crop: [384, 512]
+max_disp: 192
+
+amp: false
+
+predict_uncertainty: true
+init_from: checkpoints/middlebury_aanet_v2/best.pt   # 14.4% D1 backbone (120 epochs, lr=2e-4)
+
+middlebury_variant: both
+
+ckpt_dir: checkpoints/middlebury_aanet_uncertainty
+log_every: 5

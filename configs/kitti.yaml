@@ -1,0 +1,18 @@
+# KITTI 2015 training config.
+dataset: kitti
+data_root: datasets/data_scene_flow   # contains training/{image_2,image_3,disp_occ_0}
+val_split: 0.1
+
+epochs: 100
+batch_size: 4
+num_workers: 4
+lr: 1.0e-3
+weight_decay: 1.0e-4
+
+# KITTI is 1242x375 native; we train on random 256x512 crops.
+crop: [256, 512]
+max_disp: 192
+
+amp: false
+ckpt_dir: checkpoints/kitti
+log_every: 20

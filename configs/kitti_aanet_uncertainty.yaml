@@ -1,0 +1,36 @@
+# AANet uncertainty-head fine-tune on KITTI 2015.
+#
+# Starts from the fine-tuned AANet backbone checkpoint (kitti_aanet_ft/best.pt),
+# freezes the entire backbone, and trains ONLY the Laplace uncertainty head.
+# Loss switches from smooth-L1 to Laplace NLL: |pred - gt| / b + log(b).
+#
+# The backbone freeze is automatic: when model=aanet, predict_uncertainty=true,
+# AND init_from is set, train.py freezes all params except uncertainty_head.
+#
+# Run with:
+#   python scripts/train.py --config configs/kitti_aanet_uncertainty.yaml
+
+model: aanet
+dataset: kitti
+data_root: datasets/data_scene_flow
+val_split: 0.1
+
+# Fewer epochs: the backbone is frozen, only the small head (~9k params) trains.
+epochs: 30
+batch_size: 4
+num_workers: 4
+
+lr: 3.0e-4
+weight_decay: 1.0e-4
+
+crop: [256, 512]
+max_disp: 192
+
+amp: false
+
+# These two flags together trigger the backbone freeze in train.py.
+predict_uncertainty: true
+init_from: checkpoints/kitti_aanet_ft/best.pt
+
+ckpt_dir: checkpoints/kitti_aanet_uncertainty
+log_every: 20

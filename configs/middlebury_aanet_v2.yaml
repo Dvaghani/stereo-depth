@@ -1,0 +1,32 @@
+# Exp A — deployment-safe (downsample=2) improved fine-tune.
+#
+# The original middlebury_aanet run UNDERFIT: train loss floored ~6-7 and masked
+# val EPE matched it (no overfit gap), with lr cosine-decaying from a timid 5e-5
+# to 0 over 60 epochs. Since we evaluate on Middlebury (not KITTI), preserving
+# the KITTI geometry via a tiny lr is not worth the lost fit. This run pushes the
+# lr 4x, trains longer, and softens the (asymmetric) color jitter that makes
+# matching harder on a 23-scene set.
+model: aanet
+dataset: middlebury
+data_root: datasets/middlebury2014
+val_split: 0.15
+
+epochs: 120
+batch_size: 2
+num_workers: 4
+
+lr: 2.0e-4            # was 5e-5 — the prior run underfit
+weight_decay: 1.0e-4
+
+crop: [384, 512]
+max_disp: 192
+downsample: 2         # deployment resolution (--scale 0.5)
+color_jitter: 0.2     # was 0.4 — lighter aug helps fit tiny data
+
+amp: false
+predict_uncertainty: false
+init_from: checkpoints/kitti_aanet_ft/best.pt
+middlebury_variant: both
+
+ckpt_dir: checkpoints/middlebury_aanet_v2
+log_every: 10

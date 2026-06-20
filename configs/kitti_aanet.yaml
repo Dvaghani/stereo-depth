@@ -1,0 +1,32 @@
+# AANet backbone fine-tune on KITTI 2015.
+#
+# Starts from the official pretrained KITTI 2015 weights and fine-tunes the
+# full backbone with smooth-L1 loss for a small number of epochs.  This adapts
+# the pretrained weights to our exact crop size and data pipeline.
+#
+# Run with:
+#   python scripts/train.py --config configs/kitti_aanet.yaml
+
+model: aanet
+dataset: kitti
+data_root: datasets/data_scene_flow
+val_split: 0.1
+
+epochs: 50
+batch_size: 4
+num_workers: 4
+
+# Low LR — backbone is already well-trained; we just want slight adaptation.
+lr: 1.0e-4
+weight_decay: 1.0e-4
+
+crop: [256, 512]
+max_disp: 192
+
+amp: false
+
+predict_uncertainty: false
+init_from: checkpoints/kitti_aanet/aanet_kitti2015.pth
+
+ckpt_dir: checkpoints/kitti_aanet_ft
+log_every: 20

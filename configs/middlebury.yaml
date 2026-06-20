@@ -1,0 +1,18 @@
+# Middlebury 2014 training config.
+
+dataset: middlebury
+data_root: datasets/middlebury2014
+val_split: 0.15
+
+epochs: 200
+batch_size: 2
+num_workers: 4
+lr: 5.0e-4
+weight_decay: 1.0e-4
+
+crop: [384, 512]
+max_disp: 256
+
+amp: true
+ckpt_dir: checkpoints/middlebury
+log_every: 10

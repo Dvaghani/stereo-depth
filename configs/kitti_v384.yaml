@@ -1,0 +1,25 @@
+# KITTI 2015 trained with max_disp=384 and the uncertainty head from scratch.
+# Run with:
+#   python scripts/train.py --config configs/kitti_v384.yaml
+
+dataset: kitti
+data_root: datasets/data_scene_flow
+val_split: 0.1
+
+
+epochs: 200
+batch_size: 4
+num_workers: 4
+
+lr: 1.0e-3
+weight_decay: 1.0e-4
+
+crop: [256, 512]
+max_disp: 384
+
+amp: false
+
+predict_uncertainty: true
+
+ckpt_dir: checkpoints/kitti_v384
+log_every: 20

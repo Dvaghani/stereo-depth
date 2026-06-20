@@ -1,0 +1,26 @@
+# KITTI 2015 — train the disparity backbone AND the Laplace uncertainty head
+
+#   python scripts/train.py --config configs/kitti_uncertainty_scratch.yaml
+
+dataset: kitti
+data_root: datasets/data_scene_flow
+val_split: 0.1
+
+
+epochs: 200
+batch_size: 4
+num_workers: 4
+
+lr: 1.0e-3
+weight_decay: 1.0e-4
+
+crop: [256, 512]
+max_disp: 192
+
+amp: false
+
+# Build the uncertainty head from the start. No init_from — random init,
+predict_uncertainty: true
+
+ckpt_dir: checkpoints/kitti_uncertainty_scratch
+log_every: 20

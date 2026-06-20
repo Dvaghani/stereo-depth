@@ -1,0 +1,27 @@
+# Middlebury 2014 fine-tune from the max_disp=384 KITTI checkpoint.
+# Run with:
+#   python scripts/train.py --config configs/middlebury_uncertainty.yaml
+
+dataset: middlebury
+data_root: datasets/middlebury2014
+val_split: 0.15
+
+epochs: 100
+batch_size: 2
+num_workers: 4
+
+lr: 3.0e-4
+weight_decay: 1.0e-4
+
+crop: [384, 512]
+max_disp: 384
+
+amp: false
+
+predict_uncertainty: true
+init_from: checkpoints/kitti_v384/best.pt
+
+middlebury_variant: imperfect
+
+ckpt_dir: checkpoints/middlebury_uncertainty
+log_every: 5
