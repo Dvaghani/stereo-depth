@@ -28,13 +28,14 @@ sys.path.insert(0, str(_HERE.parent))
 from src.models import StereoUNet
 from src.models.stereo_unet import StereoUNetConfig
 from src.models.aanet import AANetWrapper
-from src.datasets import KITTI2015Stereo, Middlebury2014Stereo, StereoTransform
+from src.datasets import KITTI2015Stereo, Middlebury2014Stereo, SceneFlowStereo, StereoTransform
 from src.utils.losses import multi_scale_loss
 from src.utils.metrics import compute_kitti_metrics
 
 
 def build_dataset(name: str, root: str, training: bool, crop, middlebury_variant: str = "imperfect",
-                  downsample: int = 2, color_jitter: float = 0.4):
+                  downsample: int = 2, color_jitter: float = 0.4, max_disp: int = 192,
+                  sceneflow_split: str = "train"):
     transform = StereoTransform(
         crop_size=tuple(crop) if training else None,
         color_jitter=color_jitter if training else 0.0,
@@ -46,6 +47,9 @@ def build_dataset(name: str, root: str, training: bool, crop, middlebury_variant
     if name == "middlebury":
         return Middlebury2014Stereo(root, transform=transform, downsample=downsample,
                                     variant=middlebury_variant)
+    if name == "sceneflow":
+        return SceneFlowStereo(root, split=sceneflow_split, transform=transform,
+                               max_disp=float(max_disp))
     raise ValueError(f"Unknown dataset: {name}")
 
 
@@ -56,7 +60,7 @@ def parse_args():
     p.add_argument("--model", choices=["unet", "aanet"], default="unet",
                    help="Model architecture. 'aanet' uses AANetWrapper; "
                         "'unet' uses the original StereoUNet.")
-    p.add_argument("--dataset", choices=["kitti", "middlebury"], default="kitti")
+    p.add_argument("--dataset", choices=["kitti", "middlebury", "sceneflow"], default="kitti")
     p.add_argument("--data-root", type=str, required=False)
     p.add_argument("--val-split", type=float, default=0.1)
     p.add_argument("--epochs", type=int, default=100)
@@ -118,16 +122,26 @@ def main():
     ckpt_dir = Path(args.ckpt_dir); ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     # Datasets
-    full = build_dataset(args.dataset, args.data_root, training=True, crop=args.crop,
-                         middlebury_variant=args.middlebury_variant,
-                         downsample=args.downsample, color_jitter=args.color_jitter)
-    n_val = max(1, int(len(full) * args.val_split))
-    n_train = len(full) - n_val
-    train_set, val_set = torch.utils.data.random_split(
-        full, [n_train, n_val], generator=torch.Generator().manual_seed(42)
-    )
-    # Validation uses no crop / no jitter
-    val_set.dataset.transform = StereoTransform(crop_size=tuple(args.crop), training=False)
+    val_transform = StereoTransform(crop_size=tuple(args.crop), training=False)
+    if args.dataset.lower() == "sceneflow":
+        # SceneFlow has a pre-defined train/val split — use it directly.
+        train_set = build_dataset(args.dataset, args.data_root, training=True,
+                                  crop=args.crop, color_jitter=args.color_jitter,
+                                  max_disp=args.max_disp, sceneflow_split="train")
+        val_set   = build_dataset(args.dataset, args.data_root, training=False,
+                                  crop=args.crop, color_jitter=0.0,
+                                  max_disp=args.max_disp, sceneflow_split="val")
+        val_set.transform = val_transform
+    else:
+        full = build_dataset(args.dataset, args.data_root, training=True, crop=args.crop,
+                             middlebury_variant=args.middlebury_variant,
+                             downsample=args.downsample, color_jitter=args.color_jitter)
+        n_val = max(1, int(len(full) * args.val_split))
+        n_train = len(full) - n_val
+        train_set, val_set = torch.utils.data.random_split(
+            full, [n_train, n_val], generator=torch.Generator().manual_seed(42)
+        )
+        val_set.dataset.transform = val_transform
 
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,
                               num_workers=args.num_workers, pin_memory=True, drop_last=True)

@@ -1,5 +1,6 @@
 # ── Datasets (large, download separately) ────────────────────────────────────
-datasets/
+# Leading slash anchors to repo root so src/datasets/ source code is NOT excluded.
+/datasets/
 
 # ── Checkpoints (large .pt/.pth files) ───────────────────────────────────────
 checkpoints/

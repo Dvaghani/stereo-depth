@@ -1,0 +1,36 @@
+# AANet pre-training on SceneFlow FlyingThings3D subset.
+#
+# Goal: give the model broad synthetic depth cues before Middlebury fine-tune.
+# 3 epochs is enough to adapt without overfitting (21 818 train samples).
+#
+# On Kaggle (T4/P100), symlink the two datasets into a unified tree first:
+#   mkdir -p /tmp/sceneflow/train /tmp/sceneflow/val
+#   ln -s /kaggle/input/sceneflow-images/train_image_clean /tmp/sceneflow/train/image_clean
+#   ln -s /kaggle/input/sceneflow-images/val_image_clean   /tmp/sceneflow/val/image_clean
+#   ln -s /kaggle/input/sceneflow-disparity/train_disparity /tmp/sceneflow/train/disparity
+#   ln -s /kaggle/input/sceneflow-disparity/val_disparity   /tmp/sceneflow/val/disparity
+#
+# Run with:
+#   python scripts/train.py --config configs/sceneflow_aanet.yaml
+
+model: aanet
+dataset: sceneflow
+data_root: /tmp/sceneflow          # override in Kaggle notebook if needed
+
+epochs: 3
+batch_size: 4
+num_workers: 4
+
+lr: 1.0e-4
+weight_decay: 1.0e-4
+
+crop: [256, 512]
+max_disp: 192
+
+amp: false
+
+predict_uncertainty: false
+init_from: checkpoints/kitti_aanet_ft/best.pt
+
+ckpt_dir: checkpoints/sceneflow_aanet_ft
+log_every: 200
