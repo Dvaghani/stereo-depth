@@ -170,12 +170,6 @@ def main():
         cfg_dict = cfg.__dict__
         print(f"Model: StereoUNet  params={sum(p.numel() for p in model.parameters()):,}")
 
-    # Use all available GPUs
-    n_gpus = torch.cuda.device_count()
-    if n_gpus > 1:
-        print(f"Using {n_gpus} GPUs with DataParallel")
-        model = torch.nn.DataParallel(model)
-
     # ── Weight initialisation ─────────────────────────────────────────────────
     start_epoch = 0
     best_d1 = float("inf")
@@ -225,6 +219,12 @@ def main():
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f"Backbone FROZEN — {frozen:,} params frozen, {trainable:,} trainable "
               f"(uncertainty head only)")
+
+    # Use all available GPUs — must be AFTER weight loading and backbone freeze
+    n_gpus = torch.cuda.device_count()
+    if n_gpus > 1:
+        print(f"Using {n_gpus} GPUs with DataParallel")
+        model = torch.nn.DataParallel(model)
 
     # ── Optimiser ─────────────────────────────────────────────────────────────
     trainable_params = [p for p in model.parameters() if p.requires_grad]
