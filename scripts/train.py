@@ -276,6 +276,7 @@ def main():
         sched.step()
 
         # ---------------------- validation --------------------------------
+        torch.cuda.empty_cache()
         model.eval()
         agg = {"EPE": 0.0, "D1-all": 0.0, "bad-1": 0.0, "bad-2": 0.0, "bad-3": 0.0}
         n = 0
