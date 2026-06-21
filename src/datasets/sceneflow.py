@@ -76,9 +76,7 @@ class SceneFlowStereo(Dataset):
         left  = np.asarray(Image.open(lp).convert("RGB"))
         right = np.asarray(Image.open(rp).convert("RGB"))
         disparity, _ = read_pfm(dp)
-        disparity = disparity.astype(np.float32)
-        # Clamp out-of-range values — SceneFlow contains a small number of
-        # very large disparities that destabilise training on max_disp=192.
+        disparity = np.abs(disparity.astype(np.float32))  # FlyingThings3D stores as negative floats
         disparity = np.where(
             (disparity > 0) & (disparity < self.max_disp), disparity, 0.0
         )
