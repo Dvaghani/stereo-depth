@@ -220,9 +220,11 @@ def main():
         print(f"Backbone FROZEN — {frozen:,} params frozen, {trainable:,} trainable "
               f"(uncertainty head only)")
 
-    # Use all available GPUs — must be AFTER weight loading and backbone freeze
+    # Use all available GPUs — must be AFTER weight loading and backbone freeze.
+    # Skip DataParallel when backbone is frozen: only 9k params are trainable,
+    # multi-GPU adds overhead and causes grad_fn issues with dict outputs.
     n_gpus = torch.cuda.device_count()
-    if n_gpus > 1:
+    if n_gpus > 1 and not freeze_backbone:
         print(f"Using {n_gpus} GPUs with DataParallel")
         model = torch.nn.DataParallel(model)
 
