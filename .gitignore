@@ -48,3 +48,9 @@ Thumbs.db
 # ── Misc ─────────────────────────────────────────────────────────────────────
 *.tmp
 *.bak
+
+# ── Third-party clones (RAFT-Stereo etc. — cloned by setup, not our source) ──
+third_party/RAFT-Stereo/
+
+# ── Downloaded model weights ─────────────────────────────────────────────────
+yolo11n.pt

@@ -190,7 +190,9 @@ def main():
     disp_np  = disp[0].cpu().numpy().astype(np.float32)
     depth_np = disparity_to_depth(disp_np, args.baseline, focal_eff).astype(np.float32)
 
-    save_disparity_visualization(disp_np, out_dir / "disparity.png", max_disp=float(max_disp))
+    # turbo (near=red, far=blue) with contrast stretched to the scene's range
+    save_disparity_visualization(disp_np, out_dir / "disparity.png",
+                                 max_disp=None, cmap="turbo")
     write_pfm(out_dir / "disparity.pfm", disp_np)
     depth_mm = np.clip(depth_np * 1000.0, 0, 65535).astype(np.uint16)
     Image.fromarray(depth_mm).save(out_dir / "depth_mm.png")
@@ -206,7 +208,7 @@ def main():
         mask = (b_np < 2.0).astype(np.float32)
         disp_masked = disp_np * mask
         save_disparity_visualization(disp_masked, out_dir / "disparity_confident.png",
-                                     max_disp=float(max_disp))
+                                     max_disp=None, cmap="turbo")
         saved += ["uncertainty_b.png", "disparity_confident.png"]
 
     print(f"Saved {', '.join(saved)} → {out_dir}")

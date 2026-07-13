@@ -104,12 +104,23 @@ def save_disparity_visualization(
     max_disp: float | None = None,
     cmap: str = "magma",
 ) -> None:
+    """max_disp=None stretches contrast to the scene's actual disparity range
+    (2-98 percentile) — far scenes only occupy a fraction of the model's
+    disparity range and look flat with fixed normalization."""
     from PIL import Image
 
     arr = np.asarray(disparity, dtype=np.float32)
     if max_disp is None:
-        max_disp = float(np.nanpercentile(arr[arr > 0], 99)) if np.any(arr > 0) else 1.0
-    norm = np.clip(arr / max(max_disp, 1e-6), 0.0, 1.0)
+        valid = arr[arr > 0]
+        if valid.size > 100:
+            lo = float(np.nanpercentile(valid, 2))
+            hi = float(np.nanpercentile(valid, 98))
+            hi = max(hi, lo + 1e-3)
+        else:
+            lo, hi = 0.0, 1.0
+    else:
+        lo, hi = 0.0, float(max_disp)
+    norm = np.clip((arr - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
 
     try:
         import matplotlib.cm as cm
