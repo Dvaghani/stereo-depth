@@ -110,7 +110,11 @@ def compute_range_map(depth_full, cx, cy, focal_px):
     return np.where(depth_full > 0, R, 0.0)
 
 
-def draw_detections(vis, results, depth_full, range_full, class_names):
+def draw_detections(vis, results, depth_full, range_full, class_names,
+                    b_full=None, b_thresh=2.0):
+    """b_full: per-pixel Laplace scale (uncertainty). When given, distance
+    statistics use only confident pixels (b < b_thresh) if enough exist,
+    and the label shows the confident fraction inside the box."""
     H, W = depth_full.shape
     for i, box in enumerate(results.boxes):
         cls  = int(box.cls)
@@ -120,12 +124,21 @@ def draw_detections(vis, results, depth_full, range_full, class_names):
         x1c = max(0, x1); y1c = max(0, y1)
         x2c = min(W-1, x2); y2c = min(H-1, y2)
 
-        roi   = depth_full[y1c:y2c, x1c:x2c]
-        valid = roi[roi > 0]
+        roi  = depth_full[y1c:y2c, x1c:x2c]
+        mask = roi > 0
+        conf_pct = None
+        if b_full is not None:
+            b_roi = b_full[y1c:y2c, x1c:x2c]
+            conf_mask = mask & (b_roi < b_thresh)
+            conf_pct = 100.0 * conf_mask.mean() if conf_mask.size else 0.0
+            # prefer confident pixels for the distance stats when enough exist
+            if conf_mask.sum() > 0.1 * max(mask.sum(), 1):
+                mask = conf_mask
+        valid = roi[mask]
         dist_med = float(np.median(valid)) if len(valid) else 0.0
         dist_min = float(np.min(valid))    if len(valid) else 0.0
 
-        roi_r   = range_full[y1c:y2c, x1c:x2c]
+        roi_r   = range_full[y1c:y2c, x1c:x2c][mask]
         valid_r = roi_r[roi_r > 0]
         range_min = float(np.min(valid_r)) if len(valid_r) else 0.0
 
@@ -133,6 +146,8 @@ def draw_detections(vis, results, depth_full, range_full, class_names):
         cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
 
         line1 = f"{name} {conf:.0%}"
+        if conf_pct is not None:
+            line1 += f"  conf {conf_pct:.0f}%"
         line2 = f"Z: med {dist_med:.2f}m  near {dist_min:.2f}m"
         line3 = f"true dist: {range_min:.2f}m"
         font, fs, ft = cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2
@@ -147,30 +162,42 @@ def draw_detections(vis, results, depth_full, range_full, class_names):
         cv2.putText(vis, line3, (x1+4, y1 - 4),         font, fs, (255,255,255), ft)
 
 
-def load_raft(device):
-    """Load RAFT-Stereo realtime model from third_party."""
+def load_raft(device, ckpt=None):
+    """Load RAFT-Stereo realtime-config model from third_party.
+    ckpt=None uses the pretrained realtime weights; pass a path to use a
+    fine-tuned checkpoint. Checkpoints containing an uncertainty head
+    (unc_head.* keys) are detected automatically and loaded as the
+    uncertainty-aware variant. Returns (model, InputPadder, has_uncertainty)."""
     _raft_dir = _HERE.parent / "third_party" / "RAFT-Stereo"
     sys.path.insert(0, str(_raft_dir))
     sys.path.insert(0, str(_raft_dir / "core"))
-    from raft_stereo import RAFTStereo
     from utils.utils import InputPadder
 
-    raft_args = argparse.Namespace(
-        hidden_dims=[128, 128, 128],
-        corr_implementation="reg",
-        corr_levels=4, corr_radius=4,
-        context_norm="batch",
-        # fp16 produces NaN and is slower on GTX 16xx GPUs — keep fp32
-        mixed_precision=False,
-        shared_backbone=True, n_downsample=3,
-        n_gru_layers=2, slow_fast_gru=True,
-    )
-    model = RAFTStereo(raft_args)
-    sd = torch.load(_raft_dir / "models" / "raftstereo-realtime.pth",
-                    map_location=device)
+    ckpt_path = Path(ckpt) if ckpt else _raft_dir / "models" / "raftstereo-realtime.pth"
+    print(f"RAFT checkpoint: {ckpt_path}")
+    sd = torch.load(ckpt_path, map_location=device)
     sd = {k.replace("module.", ""): v for k, v in sd.items()}
+    has_unc = any(k.startswith("unc_head") for k in sd)
+
+    if has_unc:
+        from src.models.raft_uncertainty import build_raft_uncertainty, realtime_args
+        print("Uncertainty head detected — confidence-aware mode.")
+        model = build_raft_uncertainty(realtime_args(mixed_precision=False))
+    else:
+        from raft_stereo import RAFTStereo
+        raft_args = argparse.Namespace(
+            hidden_dims=[128, 128, 128],
+            corr_implementation="reg",
+            corr_levels=4, corr_radius=4,
+            context_norm="batch",
+            # fp16 produces NaN and is slower on GTX 16xx GPUs — keep fp32
+            mixed_precision=False,
+            shared_backbone=True, n_downsample=3,
+            n_gru_layers=2, slow_fast_gru=True,
+        )
+        model = RAFTStereo(raft_args)
     model.load_state_dict(sd)
-    return model.to(device).eval(), InputPadder
+    return model.to(device).eval(), InputPadder, has_unc
 
 
 def parse_args():
@@ -178,7 +205,8 @@ def parse_args():
     p.add_argument("--backend",     choices=["raft", "aanet"], default="raft",
                    help="raft: robust zero-shot (default). aanet: our trained model.")
     p.add_argument("--ckpt",        default=None,
-                   help="AANet checkpoint (required for --backend aanet).")
+                   help="AANet checkpoint (required for --backend aanet). For "
+                        "--backend raft: optional fine-tuned RAFT checkpoint.")
     p.add_argument("--calib",       type=Path, required=True)
     p.add_argument("--yolo",        default="yolo11n.pt")
     p.add_argument("--left-index",  type=int, default=0)
@@ -215,9 +243,10 @@ def main():
 
     # ── Load stereo backend ───────────────────────────────────────────────────
     max_disp = args.max_disp
+    has_unc = False
     if args.backend == "raft":
         print("Loading RAFT-Stereo (realtime)...")
-        model, InputPadder = load_raft(device)
+        model, InputPadder, has_unc = load_raft(device, ckpt=args.ckpt)
     else:
         if not args.ckpt:
             raise SystemExit("--backend aanet requires --ckpt")
@@ -278,6 +307,7 @@ def main():
         rectR = cv2.remap(frameR, map1R, map2R, cv2.INTER_LINEAR)
 
         # ── Depth inference ───────────────────────────────────────────────────
+        b_full = None
         if args.backend == "raft":
             # RAFT takes raw 0-255 RGB floats, pad to /32
             w = int(cap_w * args.scale); h = int(cap_h * args.scale)
@@ -292,7 +322,12 @@ def main():
             padder = InputPadder(t1.shape, divis_by=32)
             t1, t2 = padder.pad(t1, t2)
             with torch.no_grad():
-                _, flow_up = model(t1, t2, iters=args.iters, test_mode=True)
+                if has_unc:
+                    _, flow_up, log_b = model(t1, t2, iters=args.iters, test_mode=True)
+                    b_small = padder.unpad(log_b).squeeze().exp().cpu().numpy()
+                    b_full = cv2.resize(b_small, (cap_w, cap_h), interpolation=cv2.INTER_LINEAR)
+                else:
+                    _, flow_up = model(t1, t2, iters=args.iters, test_mode=True)
             disp = -padder.unpad(flow_up).squeeze().cpu().numpy()
         else:
             def to_t(bgr):
@@ -325,7 +360,8 @@ def main():
         disp_color = colorize_disparity(disp, float(max_disp),
                                         cmap=args.cmap, auto_norm=not args.fixed_norm)
         disp_color = cv2.resize(disp_color, (cap_w, cap_h))
-        draw_detections(disp_color, yolo_res, depth_full, range_full, class_names)
+        draw_detections(disp_color, yolo_res, depth_full, range_full, class_names,
+                        b_full=b_full)
 
         # FPS on disparity panel
         now = time.time()

@@ -61,6 +61,47 @@ with the same protocol as the thesis table:
 | RAFT-realtime zero-shot, 16 iters | 7.36% |
 | RAFT-realtime fine-tuned (this run) | **target: < 6%** |
 
+## KITTI fine-tune (second run)
+
+Upload KITTI the same way (zip `/run/media/dvaghani/Expansion/Dataset/data_scene_flow`,
+name the dataset e.g. `kitti-scene-flow`), paste `train_raft_kitti.py` via
+`%%writefile /kaggle/working/train_raft_kitti.py`, then:
+
+```python
+!python /kaggle/working/train_raft_kitti.py \
+    --data-root /kaggle/input/kitti-scene-flow/data_scene_flow \
+    --raft-dir  /kaggle/working/RAFT-Stereo \
+    --ckpt      /kaggle/working/RAFT-Stereo/models/raftstereo-realtime.pth \
+    --out       /kaggle/working/ckpt_kitti \
+    --steps 4000 --batch-size 4 --crop 320 640 --lr 2e-5
+```
+
+(Adjust `--data-root` to whatever `!ls /kaggle/input/` shows — the folder that
+contains `training/image_2`.) Reference: AANet fine-tuned = 0.72% D1,
+RAFT zero-shot = 5.10%. Download `ckpt_kitti/best.pth` →
+`stereo_unet/checkpoints/raft_kitti_ft/best.pth`.
+
+## Uncertainty head (phase 3)
+
+Needs the fine-tuned checkpoint as input: upload
+`checkpoints/raft_middlebury_ft/best.pth` as a Kaggle dataset (e.g.
+`raft-middlebury-ft`). Paste `train_raft_uncertainty.py` via `%%writefile`,
+then (Middlebury dataset + RAFT-Stereo clone as before):
+
+```python
+!python /kaggle/working/train_raft_uncertainty.py \
+    --data-root /kaggle/input/middlebury2014 \
+    --raft-dir  /kaggle/working/RAFT-Stereo \
+    --ckpt      /kaggle/input/raft-middlebury-ft/best.pth \
+    --out       /kaggle/working/ckpt_unc \
+    --steps 2000 --batch-size 4 --crop 320 640 --lr 1e-4
+```
+
+Base network is frozen — only the 149k-param head trains, so this is the
+fastest run (~20-30 min). Watch the sparsification line: D1@100% → D1@50% →
+D1@20% must decrease monotonically. Download `ckpt_unc/best.pth` →
+`stereo_unet/checkpoints/raft_middlebury_unc/best.pth`.
+
 ## Hyperparameters to try if the first run disappoints
 
 - `--lr 1e-5` (more conservative) or `--lr 4e-5`
