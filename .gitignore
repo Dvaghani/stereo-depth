@@ -54,5 +54,6 @@ third_party/RAFT-Stereo/
 
 # ── Downloaded model weights ─────────────────────────────────────────────────
 yolo11n.pt
+yolov8x-worldv2.pt
 # Anchored to repo root: third-party downloads (CLIP ViT-B-32 etc.), not source.
 /weights/
