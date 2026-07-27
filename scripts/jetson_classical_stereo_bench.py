@@ -52,16 +52,42 @@ def report(name, disp, times, out_path):
     print("  saved -> %s" % out_path)
 
 
+VPI_MAX_DISPARITY = 64   # hard limit in VPI 1.x, regardless of backend
+
+
+def _vpi_to_numpy(img):
+    """Read a VPI image back to numpy. The API changed across VPI releases:
+    1.0 exposes .cpu()/.rlock(), later versions .rlock_cpu()."""
+    for attr in ("rlock_cpu", "rlock"):
+        fn = getattr(img, attr, None)
+        if fn is None:
+            continue
+        try:
+            with fn() as data:
+                return np.array(data)
+        except Exception:
+            continue
+    fn = getattr(img, "cpu", None)
+    if fn is not None:
+        return np.array(fn())
+    raise RuntimeError("no known readback method on vpi.Image (tried "
+                       "rlock_cpu, rlock, cpu)")
+
+
 def run_vpi(left, right, maxdisp, runs):
     try:
         import vpi
     except ImportError:
         print("\n=== VPI ===\n  not available (no `vpi` module) — skipping")
         return
-    print("\nVPI version: %s" % getattr(vpi, "__version__", "unknown"))
 
-    # stereodisp wants 16-bit grayscale; formats/backends vary by VPI release,
-    # so try CUDA then fall back to CPU.
+    if maxdisp > VPI_MAX_DISPARITY:
+        print("\n  NOTE: VPI caps maximum disparity at %d; requested %d. Clamping."
+              "\n  The scene reaches ~122 px, so the near field WILL be clipped —"
+              "\n  that limitation is itself a result worth reporting."
+              % (VPI_MAX_DISPARITY, maxdisp))
+        maxdisp = VPI_MAX_DISPARITY
+
     for backend_name in ("CUDA", "CPU"):
         backend = getattr(vpi.Backend, backend_name, None)
         if backend is None:
@@ -74,10 +100,8 @@ def run_vpi(left, right, maxdisp, runs):
             def go():
                 with backend:
                     d = vpi.stereodisp(vl, vr, maxdisp=maxdisp)
-                    d = d.convert(vpi.Format.U16, scale=1.0)
-                with d.rlock_cpu() as arr:
-                    # VPI returns Q10.5 fixed point -> divide by 32 for pixels
-                    return np.array(arr).astype(np.float32) / 32.0
+                # stereodisp returns Q10.5 fixed point -> /32 for pixel units
+                return _vpi_to_numpy(d).astype(np.float32) / 32.0
 
             disp, times = bench(go, runs)
             report("VPI stereodisp (%s, maxdisp=%d)" % (backend_name, maxdisp),
@@ -85,7 +109,7 @@ def run_vpi(left, right, maxdisp, runs):
             return
         except Exception as exc:
             print("  VPI %s backend failed: %s" % (backend_name, exc))
-    print("  all VPI backends failed — reporting OpenCV SGBM only")
+    print("  all VPI backends failed")
 
 
 def run_sgbm(left, right, maxdisp, runs):
@@ -122,14 +146,19 @@ def main():
     p.add_argument("--maxdisp", type=int, default=128,
                    help="reference pair reaches 122 px at 640x480; 64 will clip")
     p.add_argument("--runs", type=int, default=20)
+    p.add_argument("--only", choices=["vpi", "sgbm"], default=None,
+                   help="run just one matcher — VPI can destabilise the process, "
+                        "so run them separately if the other segfaults")
     args = p.parse_args()
 
     left = load_gray(args.left, args.width, args.height)
     right = load_gray(args.right, args.width, args.height)
     print("input %dx%d grayscale, maxdisp=%d" % (args.width, args.height, args.maxdisp))
 
-    run_vpi(left, right, args.maxdisp, args.runs)
-    run_sgbm(left, right, args.maxdisp, args.runs)
+    if args.only != "sgbm":
+        run_vpi(left, right, args.maxdisp, args.runs)
+    if args.only != "vpi":
+        run_sgbm(left, right, args.maxdisp, args.runs)
 
     print("\nCompare accuracy on the desktop, e.g.:")
     print("  python scripts/compare_disparity.py --ckpt <raft.pth> \\")
