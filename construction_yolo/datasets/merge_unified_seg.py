@@ -43,6 +43,7 @@ BOX_SOURCES = [
     Path("/run/media/dvaghani/Expansion/Yolo/sources/openimages_yolo"),
     Path("/run/media/dvaghani/Expansion/Yolo/sources/mocs_yolo"),
     Path("/run/media/dvaghani/Expansion/Yolo/sources/barricade_barrier_yolo"),
+    Path("/run/media/dvaghani/Expansion/Yolo/sources/utility_pole_yolo"),
 ]
 
 # already-polygon sources, with their own train/val split to respect
@@ -61,6 +62,11 @@ VAL_TOPUP = [
      "mocs_val_", "suspended-load", 150),
     (Path("/run/media/dvaghani/Expansion/Yolo/sources/barricade_barrier_yolo"),
      "barricade_barrier_valid_", "barrier", None),
+    # pole's existing val instances are YOLO-World pseudo-labels, so its score
+    # measures agreement with its own noise. Routing this source's val split in
+    # gives it real ground truth to be judged against.
+    (Path("/run/media/dvaghani/Expansion/Yolo/sources/utility_pole_yolo"),
+     "utility_pole_valid_", "pole", None),
 ]
 
 
