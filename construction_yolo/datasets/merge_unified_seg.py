@@ -44,6 +44,7 @@ BOX_SOURCES = [
     Path("/run/media/dvaghani/Expansion/Yolo/sources/mocs_yolo"),
     Path("/run/media/dvaghani/Expansion/Yolo/sources/barricade_barrier_yolo"),
     Path("/run/media/dvaghani/Expansion/Yolo/sources/utility_pole_yolo"),
+    Path("/run/media/dvaghani/Expansion/Yolo/sources/container_v1_yolo"),
 ]
 
 # already-polygon sources, with their own train/val split to respect
@@ -67,6 +68,8 @@ VAL_TOPUP = [
     # gives it real ground truth to be judged against.
     (Path("/run/media/dvaghani/Expansion/Yolo/sources/utility_pole_yolo"),
      "utility_pole_valid_", "pole", None),
+    (Path("/run/media/dvaghani/Expansion/Yolo/sources/container_v1_yolo"),
+     "container_v1_valid_", "container", None),
 ]
 
 
@@ -151,12 +154,17 @@ def main():
     counts = {"train": Counter(), "val": Counter()}
     total_bad = 0
 
-    # our own frames keep their existing split, so run-3 val stays comparable
+    # labels_seg/ holds the scaffolding-relabelled versions, already polygons;
+    # fall back to the original boxes if the relabel has not been run
     for split in ("train", "val"):
-        ok, bad = copy_split(OWN_DATASET / "images" / split,
-                             OWN_DATASET / "labels" / split,
+        seg_dir = OWN_DATASET / "labels_seg" / split
+        use_seg = seg_dir.exists() and any(seg_dir.glob("*.txt"))
+        lbl_dir = seg_dir if use_seg else OWN_DATASET / "labels" / split
+        if use_seg:
+            print("own/%-5s using labels_seg (scaffolding relabelled)" % split)
+        ok, bad = copy_split(OWN_DATASET / "images" / split, lbl_dir,
                              out / "images" / split, out / "labels" / split,
-                             counts[split], already_seg=False)
+                             counts[split], already_seg=use_seg)
         total_bad += bad
         print("own/%-5s %6d images  (%d skipped)" % (split, ok, bad))
 
