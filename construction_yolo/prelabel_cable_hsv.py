@@ -121,8 +121,11 @@ def process(img_path: Path, out_dir: Path, preview: bool):
         vis = bgr.copy()
         cv2.drawContours(vis, [np.array(s["points"], dtype=np.int32) for s in shapes],
                          -1, (0, 0, 255), 2)
-        prev_dir = out_dir / "_preview"
-        prev_dir.mkdir(exist_ok=True)
+        # Sibling of out_dir, never inside it: labelme recurses into
+        # subdirectories, so previews living under the annotation folder show up
+        # as extra images to label.
+        prev_dir = out_dir.parent / (out_dir.name + "_preview")
+        prev_dir.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(prev_dir / img_path.name), vis)
 
     print("  %-46s %3d candidates (%d rejected)" % (img_path.name, len(shapes), rejected))
