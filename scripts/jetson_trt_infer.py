@@ -30,8 +30,19 @@ TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
 
 def load_engine(path):
+    # trtexec registers the standard plugin creators for you; the Python API
+    # does not. Without this, deserializing an engine containing any plugin
+    # layer fails with "corresponding IPluginCreator not found in Plugin
+    # Registry" and returns None.
+    trt.init_libnvinfer_plugins(TRT_LOGGER, "")
     with open(path, "rb") as f, trt.Runtime(TRT_LOGGER) as runtime:
-        return runtime.deserialize_cuda_engine(f.read())
+        engine = runtime.deserialize_cuda_engine(f.read())
+    if engine is None:
+        raise SystemExit(
+            "Engine deserialization failed. Check that the engine was built by "
+            "the same TensorRT version that is loading it (engines are not "
+            "portable across versions or GPU architectures).")
+    return engine
 
 
 def preprocess(path, width, height):
