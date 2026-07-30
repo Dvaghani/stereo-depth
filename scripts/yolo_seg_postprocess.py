@@ -44,14 +44,29 @@ def decode(output0, output1, conf_thres=0.25, iou_thres=0.45, img_size=640,
     detections = []
     for c in np.unique(class_ids):
         idx = np.where(class_ids == c)[0]
-        rects = [[xyxy[i][0], xyxy[i][1], xyxy[i][2] - xyxy[i][0], xyxy[i][3] - xyxy[i][1]]
-                 for i in idx]
-        scores = [float(confs[i]) for i in idx]
-        keep_idx = cv2.dnn.NMSBoxes(rects, scores, conf_thres, iou_thres)
+        # cv2.dnn.NMSBoxes on JetPack's OpenCV build (unlike desktop) fails
+        # with "SystemError: <built-in function NMSBoxes> returned NULL
+        # without setting an error" when fed numpy float32 scalars instead of
+        # native Python floats, or any degenerate (non-positive/non-finite)
+        # box — the C++ exception never reaches Python as a catchable one, so
+        # cast explicitly and filter defensively rather than let it happen.
+        rects, scores, idx_valid = [], [], []
+        for i in idx:
+            x0, y0, x1, y1 = (float(xyxy[i][0]), float(xyxy[i][1]),
+                              float(xyxy[i][2]), float(xyxy[i][3]))
+            w, h = x1 - x0, y1 - y0
+            if not (np.isfinite([x0, y0, w, h]).all() and w > 0 and h > 0):
+                continue
+            rects.append([x0, y0, w, h])
+            scores.append(float(confs[i]))
+            idx_valid.append(i)
+        if not rects:
+            continue
+        keep_idx = cv2.dnn.NMSBoxes(rects, scores, float(conf_thres), float(iou_thres))
         if len(keep_idx) == 0:
             continue
         for ki in np.array(keep_idx).flatten():
-            i = idx[ki]
+            i = idx_valid[int(ki)]
             detections.append({
                 "box": xyxy[i],
                 "conf": float(confs[i]),
