@@ -269,6 +269,40 @@ engines inside the "real" measurement. Adding the same warm-up discipline
 removed the outlier entirely — the corrected run's RAFT max/min spread is
 689.6–700.4 ms, tight and reproducible.
 
+### Capture resolution vs. latency
+
+The 1019.0 ms figure above was captured at the Brio's native 1920×1080. Since
+capture resolution and inference resolution are independent — RAFT and YOLO
+always run at their fixed engine input size (480×640 and 640×640) regardless
+of what resolution the frame arrives at, because the rectified frame is
+resized down before inference either way — the question is how much of the
+pipeline's cost is actually sensitive to capture resolution.
+
+`--capture-width`/`--capture-height` on `jetson_end_to_end_bench.py` request a
+non-native resolution from both cameras and regenerate the stereo
+rectification maps to match (`rescale_calibration()`): camera intrinsics
+(fx, fy, cx, cy) scale linearly with the resolution ratio, distortion
+coefficients and rotation are resolution-independent, so K and P are scaled
+and `cv2.initUndistortRectifyMap` reruns at the new size — reusing the
+native-resolution maps on a differently-sized frame would silently misalign
+the stereo pair instead of erroring. Both cameras were confirmed (via a
+per-resolution fresh-`VideoCapture` probe, since a live GStreamer pipeline
+won't renegotiate resolution once opened) to actually honor 1920×1080,
+1280×720, and 640×480 over MJPEG — 4K is not offered by this hardware.
+
+| Capture res | capture | rectify | RAFT | YOLO | fuse | **TOTAL** | **FPS** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1920×1080 (native) | 82.8 ms | 54.3 ms | 695.4 ms | 171.9 ms | 9.3 ms | **1013.7 ms** | **0.99** |
+| 1280×720 | 50.2 ms | 26.8 ms | 692.4 ms | 172.1 ms | 9.1 ms | **950.6 ms** | **1.05** |
+| 640×480 | 34.9 ms | 11.8 ms | 684.8 ms | 168.2 ms | 9.2 ms | **909.0 ms** | **1.10** |
+
+RAFT and YOLO stay flat within noise across all three, as expected. The
+savings come entirely from cheaper capture and rectification: 1080p→480p cuts
+capture by 58% and rectify by 78%, but total latency only drops ~10%
+(1013.7→909.0 ms, +11% FPS), because RAFT alone is 68–73% of the total budget
+and is untouched by capture resolution. Lowering capture resolution is a real
+but modest lever here — the bottleneck is RAFT's inference cost, not I/O.
+
 ### Baseline note
 
 This run used a 110 mm baseline (the rig's configuration at the time of
