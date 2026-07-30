@@ -14,13 +14,19 @@ The pipeline **runs correctly** on the Nano but **not fast enough for reactive
 obstacle avoidance**. Detection is comfortably real-time; dense stereo is not,
 and dense stereo dominates the budget.
 
-| stage | latency | rate |
+| stage | GPU inference only | real end-to-end (§9) |
 |---|---:|---:|
-| YOLO11s detection (640×640) | 105 ms | 9.5 FPS |
-| RAFT-Stereo depth (480×640, 7 iters) | 686 ms | 1.46 FPS |
-| **Combined (GPU inference only)** | **791 ms** | **1.26 FPS** |
+| YOLO11s-seg, 11 classes (640×640) | 140.8 ms | 177.0 ms |
+| RAFT-Stereo depth (480×640, 7 iters) | 686 ms | 694.5 ms |
+| capture (2× Brio, USB) | — | 82.6 ms |
+| rectify | — | 52.8 ms |
+| depth/detection fusion | — | 12.2 ms |
+| **TOTAL** | **826.8 ms → 1.21 FPS** | **1019.0 ms → 0.98 FPS** |
 
-At 1.26 FPS a drone moving at 2 m/s travels **1.58 m between depth frames**.
+The GPU-only figure is what every earlier section on this page reports —
+useful for isolating model cost, but it undercounts real deployment by **~23%**
+once capture, rectification, and pre/postprocessing are included. §9 has the
+full breakdown and how it was measured.
 
 ---
 
@@ -53,7 +59,6 @@ full-resolution reference.
 |---|---:|---:|---:|---:|---:|
 | i7 @ 480×640 *(baseline)* | 686 ms | 1.46 | 0.672 px | 2.97 px | 4.95 % |
 | **i4 @ 480×640** *(recommended)* | **530 ms** | **1.89** | 1.073 px | 5.22 px | 8.85 % |
-| ~~i2 @ 480×640~~ *(dominated)* | 431 ms | 2.32 | 2.167 px | 11.48 px | 16.0 % |
 | i7 @ 320×480 | 340 ms | 2.94 | 1.835 px | 12.27 px | 11.5 % |
 | i4 @ 320×480 | 266 ms | 3.77 | 1.949 px | 12.56 px | 12.0 % |
 
@@ -197,3 +202,83 @@ for DP4A; the Nano is 5.3. FP16 is the floor.
 
 Option 2 is the cheapest to evaluate and the most interesting result, since it
 reframes the bottleneck as a design parameter rather than a hardware limit.
+
+---
+
+## 9. Real end-to-end pipeline (with cameras)
+
+Every figure above this section is GPU-inference-only, timed on pre-loaded
+static images. It excludes USB capture, rectification, resizing, and fusing
+depth with detections — all real costs in an actual deployment. This section
+closes that gap with two live Brio cameras on the actual rig, running the
+final trained 11-class YOLO11s-seg model (box mAP50 0.621).
+
+`scripts/jetson_end_to_end_bench.py` runs the full loop — capture, rectify
+(using the existing stereo calibration), RAFT depth, YOLO detection, depth-per-
+box fusion — timed stage by stage over 20 real stereo pairs, at a 110 mm
+baseline (rig baseline at time of test; see the baseline note below).
+
+| stage | mean | range |
+|---|---:|---:|
+| capture (2× Brio, USB, MJPEG) | 82.6 ms | 80.3–86.0 ms |
+| rectify (`cv2.remap` ×2) | 52.8 ms | 49.8–66.9 ms |
+| RAFT-Stereo (480×640, 7 iters) | 694.5 ms | 689.6–700.4 ms |
+| YOLO11s-seg (640×640, 11 classes) | 177.0 ms | 174.3–183.8 ms |
+| depth/detection fusion | 12.2 ms | 11.3–14.4 ms |
+| **TOTAL** | **1019.0 ms** | **→ 0.98 FPS** |
+
+RAFT's 694.5 ms matches the isolated 686–689 ms figure almost exactly — the
+engine performs identically whether fed a static test image or a live captured
+frame. YOLO's 177.0 ms sits 36 ms above its isolated 140.8 ms because the
+isolated number only timed the raw `execute()` call; this figure honestly
+includes real preprocessing (resize, BGR→RGB) and postprocessing (per-class
+NMS, sigmoid mask reconstruction from 32 prototype coefficients) — a superset
+of what the GPU-only number measures, not a discrepancy to explain away.
+
+**Real deployment is ~23% slower than the GPU-only estimate implied** (826.8 ms
+→ 1019.0 ms). Capture and rectification alone cost 135.4 ms — more than the
+entire YOLO inference — and would have gone completely unaccounted for in any
+comparison based purely on `trtexec` numbers.
+
+### Two bugs, both worth documenting
+
+**`cv2.dnn.NMSBoxes` crashes on JetPack's OpenCV build.** It worked in desktop
+testing but failed on-device with `SystemError: <built-in function NMSBoxes>
+returned NULL without setting an error` — an uncaught C++ exception that never
+reaches Python as a catchable error. The trigger: numpy `float32` scalars
+passed where the binding expects native Python floats, or any box with
+non-positive width/height. Fixed by casting every coordinate explicitly and
+filtering degenerate boxes before the call, in `scripts/yolo_seg_postprocess.py`
+(shared by both the correctness-check script and the full pipeline, so one fix
+covers both — verified with a synthetic case reproducing the exact trigger:
+mixed valid float32 detections plus one negative-width box).
+
+**Missing warm-up inflated the first measurement by ~10×.** The initial
+end-to-end run showed a single-frame outlier — RAFT hit 1471.9 ms, YOLO hit
+1607.8 ms — against means of ~700 ms and ~180 ms respectively. The diagnostic
+that ruled out thermal throttling: `jetson_clocks --show` confirmed CPU, GPU,
+and EMC all pinned at their maximum, ruling out DVFS. The real tell was
+re-running the whole test independently: YOLO's outlier landed at 1607.8 ms
+the first time and **1609.6 ms the second — under 2 ms apart.** Thermal or
+scheduling noise doesn't reproduce that precisely; that precision is the
+signature of a deterministic one-time cost. The cause: this script never
+discarded an untimed first inference before starting the timed loop, unlike
+`jetson_trt_infer.py` and `jetson_yolo_seg_infer.py`, which both do. Frame 1
+silently paid for CUDA context lazy-init and algorithm caching for *both*
+engines inside the "real" measurement. Adding the same warm-up discipline
+removed the outlier entirely — the corrected run's RAFT max/min spread is
+689.6–700.4 ms, tight and reproducible.
+
+### Baseline note
+
+This run used a 110 mm baseline (the rig's configuration at the time of
+testing), not the 161 mm baseline referenced in §6. **Baseline has no effect on
+any of the timing above** — RAFT and YOLO process pixels at a fixed resolution
+regardless of the physical distance between the two cameras; baseline only
+enters via the final `depth = focal × baseline / disparity` division, which is
+microseconds of arithmetic and already included in the 12.2 ms fusion figure.
+Re-testing at multiple baselines would not change the FPS number and was not
+done for that reason. Baseline *does* matter for §6's VPI disparity-ceiling
+argument (a genuinely different question — minimum resolvable distance, not
+speed) — re-validating that claim with real captures at each baseline remains
+a separate, optional follow-up, not part of this latency measurement.
