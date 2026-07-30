@@ -55,23 +55,41 @@ def report(name, disp, times, out_path):
 VPI_MAX_DISPARITY = 64   # hard limit in VPI 1.x, regardless of backend
 
 
+def _as_2d(obj):
+    """Accept only a genuine 2D pixel buffer.
+
+    VPI 1.0's rlock() yields a lock object rather than the data, and
+    np.array() silently wraps that as a 0-d object array — which then reads as
+    a single NaN instead of failing. Validate rather than trust."""
+    arr = np.asarray(obj)
+    if arr.ndim >= 2 and arr.size > 1:
+        return arr
+    raise TypeError("not a pixel buffer (ndim=%d, size=%d)" % (arr.ndim, arr.size))
+
+
 def _vpi_to_numpy(img):
-    """Read a VPI image back to numpy. The API changed across VPI releases:
-    1.0 exposes .cpu()/.rlock(), later versions .rlock_cpu()."""
+    """Read a VPI image back to numpy. The accessor moved across releases:
+    1.0 exposes .cpu(); later versions use .rlock_cpu()/.rlock()."""
+    errors = []
+    fn = getattr(img, "cpu", None)
+    if fn is not None:
+        try:
+            return _as_2d(fn())
+        except Exception as exc:
+            errors.append("cpu(): %s" % exc)
+
     for attr in ("rlock_cpu", "rlock"):
         fn = getattr(img, attr, None)
         if fn is None:
             continue
         try:
             with fn() as data:
-                return np.array(data)
-        except Exception:
-            continue
-    fn = getattr(img, "cpu", None)
-    if fn is not None:
-        return np.array(fn())
-    raise RuntimeError("no known readback method on vpi.Image (tried "
-                       "rlock_cpu, rlock, cpu)")
+                return _as_2d(data)
+        except Exception as exc:
+            errors.append("%s(): %s" % (attr, exc))
+
+    raise RuntimeError("no working readback on vpi.Image — tried %s"
+                       % "; ".join(errors))
 
 
 def run_vpi(left, right, maxdisp, runs):
