@@ -248,6 +248,50 @@ def fuse_depth(disparity, detections, focal_px_at_disp_res, baseline_m):
     return detections
 
 
+def rescale_calibration(calib, target_w, target_h):
+    """Regenerate rectification maps for a DIFFERENT capture resolution than
+    the one calibration was performed at.
+
+    map1L/map2L etc. in the .npz are per-pixel lookup tables baked for the
+    native sensor resolution — they cannot simply be resized and reused on a
+    smaller frame. What DOES transfer is the camera geometry: focal length and
+    principal point scale linearly with resolution (fx,cx by width-ratio,
+    fy,cy by height-ratio); distortion coefficients are dimensionless and
+    resolution-independent; R (pure rotation between the two cameras) is
+    extrinsic and also resolution-independent. So scale K1/K2/P1/P2 and
+    regenerate the maps via cv2.initUndistortRectifyMap at the new size —
+    standard practice, not an approximation.
+
+    Returns (map1L, map2L, map1R, map2R, focal_px_at_target_res).
+    """
+    orig_w, orig_h = (int(v) for v in calib["image_size"])
+    sx, sy = target_w / float(orig_w), target_h / float(orig_h)
+
+    def scale_K(K):
+        K = K.copy()
+        K[0, 0] *= sx; K[0, 2] *= sx      # fx, cx
+        K[1, 1] *= sy; K[1, 2] *= sy      # fy, cy
+        return K
+
+    def scale_P(P):
+        P = P.copy()
+        P[0, 0] *= sx; P[0, 2] *= sx; P[0, 3] *= sx   # fx, cx, fx*Tx (baseline term)
+        P[1, 1] *= sy; P[1, 2] *= sy                   # fy, cy
+        return P
+
+    K1, K2 = scale_K(calib["K1"]), scale_K(calib["K2"])
+    P1, P2 = scale_P(calib["P1"]), scale_P(calib["P2"])
+    size = (target_w, target_h)
+
+    map1L, map2L = cv2.initUndistortRectifyMap(
+        K1, calib["D1"], calib["R1"], P1, size, cv2.CV_32FC1)
+    map1R, map2R = cv2.initUndistortRectifyMap(
+        K2, calib["D2"], calib["R2"], P2, size, cv2.CV_32FC1)
+
+    focal_px_scaled = float(P1[0, 0])
+    return map1L, map2L, map1R, map2R, focal_px_scaled
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -264,6 +308,14 @@ def main():
                    help="stereo pairs to capture for the capture-latency stat")
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--out", default="e2e_annotated.jpg")
+    p.add_argument("--capture-width", type=int, default=None,
+                   help="request a different capture resolution than the "
+                        "calibration's native size (e.g. 1280 for 720p). "
+                        "Rectification maps are regenerated to match — see "
+                        "rescale_calibration(). RAFT/YOLO inference resolution "
+                        "is unaffected either way, since the rectified frame is "
+                        "resized down to the engines' fixed input size regardless.")
+    p.add_argument("--capture-height", type=int, default=None)
     args = p.parse_args()
 
     if args.probe_cams:
@@ -275,13 +327,30 @@ def main():
                          "unless using --probe-cams")
 
     calib = np.load(args.calib)
-    map1L, map2L = calib["map1L"], calib["map2L"]
-    map1R, map2R = calib["map1R"], calib["map2R"]
-    cap_w, cap_h = (int(v) for v in calib["image_size"])
+    native_w, native_h = (int(v) for v in calib["image_size"])
     baseline_m = scalar(calib["baseline_mm"]) / 1000.0
-    focal_px_native = scalar(calib["focal_px"])
-    print("calibration: %dx%d capture, baseline %.1f mm, focal %.1f px (native)"
-          % (cap_w, cap_h, baseline_m * 1000, focal_px_native))
+
+    if args.capture_width and args.capture_height:
+        cap_w, cap_h = args.capture_width, args.capture_height
+        if (cap_w, cap_h) == (native_w, native_h):
+            map1L, map2L = calib["map1L"], calib["map2L"]
+            map1R, map2R = calib["map1R"], calib["map2R"]
+            focal_px_native = scalar(calib["focal_px"])
+        else:
+            map1L, map2L, map1R, map2R, focal_px_native = rescale_calibration(
+                calib, cap_w, cap_h)
+            print("NOTE: rectification maps regenerated for %dx%d "
+                  "(calibrated natively at %dx%d) — focal scaled to %.1f px"
+                  % (cap_w, cap_h, native_w, native_h, focal_px_native))
+    else:
+        cap_w, cap_h = native_w, native_h
+        map1L, map2L = calib["map1L"], calib["map2L"]
+        map1R, map2R = calib["map1R"], calib["map2R"]
+        focal_px_native = scalar(calib["focal_px"])
+
+    print("calibration: capturing at %dx%d (native %dx%d), baseline %.1f mm, "
+          "focal %.1f px" % (cap_w, cap_h, native_w, native_h,
+                            baseline_m * 1000, focal_px_native))
 
     raft = RaftEngine(args.raft_engine)
     yolo = YoloSegEngine(args.yolo_engine, conf_thres=args.conf)
