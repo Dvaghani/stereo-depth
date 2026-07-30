@@ -321,6 +321,21 @@ def main():
             raise SystemExit("captured zero valid frames — check camera indices "
                              "and USB bandwidth (try MJPEG, separate controllers)")
 
+    # ── warm-up: each engine's first call pays a one-time cold-start cost
+    # (CUDA context lazy-init, algorithm caching) that has nothing to do with
+    # steady-state deployment performance. jetson_trt_infer.py and
+    # jetson_yolo_seg_infer.py both do an untimed call before their timed loop;
+    # this pipeline needs the same discipline or that cost silently pollutes
+    # frame 1 of the "real" measurement — exactly what happened before this
+    # fix landed (a ~1.6s outlier, reproducible to <2ms across separate runs,
+    # which is the signature of a deterministic one-time cost, not noise).
+    print("\nwarming up both engines (untimed)...")
+    warm_left, warm_right = frames[0]
+    warm_rectL = cv2.remap(warm_left, map1L, map2L, cv2.INTER_LINEAR)
+    warm_rectR = cv2.remap(warm_right, map1R, map2R, cv2.INTER_LINEAR)
+    raft.infer(warm_rectL, warm_rectR)
+    yolo.infer(warm_rectL)
+
     # ── compute pipeline, timed per stage over the captured frames ──────────
     last_detections, last_disparity, last_left_rect = None, None, None
     for left, right in frames:
